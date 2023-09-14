@@ -37,4 +37,7 @@ quay.io/prometheuscommunity/elasticsearch-exporter:latest
 ```
 Since they are all accessing services only available on localhost, they run with `network_mode: host`.  
 
+Once everything is running, access Grafana at `http://<ip>:3000` and login with `admin/admin`.
+
+Everything is installed in `/var/opt/morpheus/morpheus-monitoring/` and runs as the `morpheus-app` user.
 
