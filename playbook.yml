@@ -1,0 +1,145 @@
+- hosts: all
+  become: true
+  environment:
+    PATH: "/opt/morpheus/bin:/opt/morpheus/embedded/bin:/opt/morpheus/embedded/sbin:{{ ansible_env.PATH }}"
+    ERL_EPMD_ADDRESS: "127.0.0.1"
+    RABBITMQ_CONF_ENV_FILE: "/opt/morpheus/embedded/rabbitmq/etc/rabbitmq-env.conf"
+  pre_tasks:
+    - name: Check if Morpheus is installed
+      stat:
+        path: /var/opt/morpheus
+      register: varoptmorphpath
+    
+    - name: Exit if Morpheus not installed and configured
+      meta: end_play
+      when: not varoptmorphpath.stat.exists
+    
+    - name: Get morpheus_app uid
+      getent:
+        database: passwd
+        key: "morpheus-app"
+      register: morpheus_app_user
+
+    - name: Get morpheus_app gid
+      getent:
+        database: group
+        key: "morpheus-app"
+      register: morpheus_app_group
+    
+    - name: Set morpheus_app uid and gid facts
+      set_fact:
+        morpheus_app_uid: "{{ morpheus_app_user['ansible_facts']['getent_passwd']['morpheus-app'][1] }}"
+        morpheus_app_gid: "{{ morpheus_app_group['ansible_facts']['getent_group']['morpheus-app'][1] }}"
+    
+    - name: print uid
+      debug: var=morpheus_app_uid
+    - name: print gid
+      debug: var=morpheus_app_gid
+
+  roles:
+    - geerlingguy.docker
+  tasks:
+    - name: Install Python docker module
+      package:
+        name: python3-docker
+        state: latest
+
+    - name: Install docker-compose
+      package:
+        name: docker-compose
+        state: latest
+
+    - name: Make main directory
+      file:
+        path: "/var/opt/morpheus/morpheus-monitoring"
+        state: directory
+        mode: '0770'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+
+    - name: Make data directories
+      file:
+        path: "/var/opt/morpheus/morpheus-monitoring/{{ item }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+      loop:
+        - "promdata"
+        - "promdata/config"
+        - "promdata/data"
+        - "prommysql"
+        - "grafanadata/data"
+        - "grafanadata/provisioning"
+        - "grafanadata/provisioning/datasources"
+        - "grafanadata/provisioning/dashboards"
+
+    - name: Copy docker-compose.yml
+      template:
+        src: "docker-compose.yml.j2"
+        dest: "/var/opt/morpheus/morpheus-monitoring/docker-compose.yml"
+        mode: '0660'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+
+    - name: Copy prometheus.yml
+      template:
+        src: "prometheus.yml.j2"
+        dest: "/var/opt/morpheus/morpheus-monitoring/promdata/config/prometheus.yml"
+        mode: '0660'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+
+    - name: Copy Grafana datasources
+      template:
+        src: "datasources.yml.j2"
+        dest: "/var/opt/morpheus/morpheus-monitoring/grafanadata/provisioning/datasources/automatic.yml"
+        mode: '0660'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+
+    - name: Copy Grafana dashboards
+      copy:
+        src: "files/{{ item }}"
+        dest: "/var/opt/morpheus/morpheus-monitoring/grafanadata/provisioning/dashboards/{{ item }}"
+        mode: '0660'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+      loop:
+        - "dashboards.yml"
+        - "dash-elasticsearch.json"
+        - "dash-mysql.json"
+        - "dash-rabbitmq.json"
+    
+    - name: Grab JSON secrets from morpheus
+      slurp:
+        src: "/etc/morpheus/morpheus-secrets.json"
+      register: morpheussecretsb64
+
+    - name: Decode secrets file
+      set_fact:
+        morpheus_secrets_json: "{{ morpheussecretsb64['content'] | b64decode | from_json }}"
+
+    - name: Set Morpheus mysql password
+      set_fact:
+        morpheus_mysql_root_password: "{{ morpheus_secrets_json['mysql']['root_password'] }}"
+
+    - name: Copy my.cnf
+      template:
+        src: "my.cnf.j2"
+        dest: "/var/opt/morpheus/morpheus-monitoring/prommysql/my.cnf"
+        mode: '0660'
+        owner: "{{ morpheus_app_uid }}"
+        group: "{{ morpheus_app_gid }}"
+
+    - name: Enable rabbitmq prometheus plugin
+      community.rabbitmq.rabbitmq_plugin:
+        names: rabbitmq_prometheus
+        state: enabled
+
+    - name: Run docker containers
+      community.general.docker_compose:
+        project_src: "/var/opt/morpheus/morpheus-monitoring"
+      register: docker_compose_output
+
+

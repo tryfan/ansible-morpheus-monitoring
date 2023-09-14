@@ -1,0 +1,34 @@
+services:
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    volumes:
+      - /var/opt/morpheus/morpheus-monitoring/grafanadata/data:/var/lib/grafana
+      - /var/opt/morpheus/morpheus-monitoring/grafanadata/provisioning:/etc/grafana/provisioning
+    user: "{{ morpheus_app_uid }}"
+    network_mode: host
+    depends_on:
+      - prometheus
+      - prom-mysql
+      - prom-es
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus
+    volumes:
+      - /var/opt/morpheus/morpheus-monitoring/promdata/config:/etc/prometheus
+      - /var/opt/morpheus/morpheus-monitoring/promdata/data:/prometheus
+    network_mode: host
+    user: "{{ morpheus_app_uid }}"
+  prom-mysql:
+    container_name: prom-mysql
+    image: prom/mysqld-exporter
+    volumes:
+      - /var/opt/morpheus/morpheus-monitoring/prommysql/my.cnf:/.my.cnf
+    network_mode: host
+    user: "{{ morpheus_app_uid }}"
+  prom-es:
+    container_name: prom-es
+    image: quay.io/prometheuscommunity/elasticsearch-exporter:latest
+    command:
+      - '--es.uri=http://localhost:9200'
+    network_mode: host
